@@ -143,13 +143,22 @@
 </main>
 
 <div id="cropModal" style="display:none;position:fixed;inset:0;background:#000d;z-index:30;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px">
-  <div style="color:#fff;font-size:15px;text-align:center">Indica en cuántas imágenes dividir el conjunto. Se numeran en <b>orden de lectura</b> (izquierda→derecha, arriba→abajo).</div>
-  <canvas id="cropCv" style="max-width:100%;border-radius:4px"></canvas>
+  <div style="color:#fff;font-size:15px;text-align:center">Indica filas y columnas. Luego <b>arrastra cualquier borde</b> de cada recuadro (arriba, abajo, izquierda, derecha) o haz clic en uno y escribe su alto y ancho. Se numeran en <b>orden de lectura</b>.</div>
+  <canvas id="cropCv" style="touch-action:none;max-width:100%;border-radius:4px"></canvas>
+  <div id="cPanel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;color:#ccc;font-size:14px;background:#1e2128;padding:8px 12px;border-radius:8px">
+    <b id="cSel" style="color:#3ecf8e">Imagen 1</b>
+    <label style="color:#ccc">Alto <input type="number" id="cH" class="tin" min="10" style="width:84px"> px</label>
+    <label style="color:#ccc">Ancho <input type="number" id="cW" class="tin" min="10" style="width:84px"> px</label>
+    <button id="cHAll" class="sec" title="Aplica el alto de la imagen elegida a todas (cada una desde su borde superior)">Mismo alto a todas</button>
+    <label style="color:#ccc" title="Al mover un borde, mueve también el borde vecino que lo toca"><input type="checkbox" id="gLink" checked> Enlazar bordes vecinos</label>
+  </div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;color:#ccc;font-size:14px">
     <label style="color:#ccc">Filas <input type="number" id="gRows" class="tin" min="1" max="12" value="3" style="width:60px"></label>
     <label style="color:#ccc">Columnas <input type="number" id="gCols" class="tin" min="1" max="12" value="1" style="width:60px"></label>
     <span id="cropInfo"></span>
     <label style="color:#ccc"><input type="checkbox" id="cropDel" checked> Quitar la original</label>
+    <label style="color:#ccc" title="Recorta los bordes vacíos de cada parte"><input type="checkbox" id="gTrim"> Quitar márgenes</label>
+    <button id="gReset" class="sec">Restablecer</button>
     <button id="cropCancel" class="sec">Cancelar</button>
     <button id="cropOk">Crear imágenes</button>
   </div>
@@ -402,50 +411,143 @@ $('split').onclick = async () => {
   toast(`✂ Separada en ${n} imágenes.`);
 };
 
-// ---- Dividir en grilla: N imagenes en orden de lectura ----
-const crop = { it: null, cells: [], k: 1, parts: [] };
-function gridCells() {
-  const img = crop.it.img, w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-  const R = Math.max(1, Math.min(12, parseInt($('gRows').value) || 1)), C = Math.max(1, Math.min(12, parseInt($('gCols').value) || 1));
-  // Si los huecos en blanco entre imagenes coinciden con la cantidad pedida, usa esos cortes exactos
-  if (crop.parts.length === R * C) return { cells: crop.parts, exact: true };
-  const cells = [];
-  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++)
-    cells.push([Math.round(c*w/C), Math.round(r*h/R), Math.round((c+1)*w/C) - 1, Math.round((r+1)*h/R) - 1]);
-  return { cells, exact: false };
+// ---- Dividir en grilla: cada recuadro tiene sus 4 bordes ajustables (x1,y1 exclusivos) ----
+const crop = { it: null, cells: [], k: 1, parts: [], w: 0, h: 0, exact: false, sel: 0, drag: null };
+const MINSZ = 12;
+const gRC = () => [Math.max(1, Math.min(12, parseInt($('gRows').value) || 1)), Math.max(1, Math.min(12, parseInt($('gCols').value) || 1))];
+function initCells() {
+  const [R, C] = gRC(), w = crop.w, h = crop.h, P = crop.parts;
+  crop.exact = P.length === R * C;
+  const ys = [0], xs = [];
+  for (let r = 1; r < R; r++) ys.push(crop.exact
+    ? Math.round((Math.max(...P.slice((r-1)*C, r*C).map(q => q[3])) + Math.min(...P.slice(r*C, (r+1)*C).map(q => q[1]))) / 2)
+    : Math.round(r * h / R));
+  ys.push(h);
+  crop.cells = [];
+  for (let r = 0; r < R; r++) {
+    const xb = [0];
+    for (let c = 1; c < C; c++) xb.push(crop.exact ? Math.round((P[r*C + c - 1][2] + P[r*C + c][0]) / 2) : Math.round(c * w / C));
+    xb.push(w);
+    for (let c = 0; c < C; c++) crop.cells.push([xb[c], ys[r], xb[c+1], ys[r+1]]);
+  }
+  crop.sel = Math.min(crop.sel, crop.cells.length - 1);
+  panelUpdate();
+}
+function panelUpdate() {
+  const c = crop.cells[crop.sel]; if (!c) return;
+  $('cSel').textContent = `Imagen ${crop.sel + 1}`;
+  if (document.activeElement !== $('cH')) $('cH').value = c[3] - c[1];
+  if (document.activeElement !== $('cW')) $('cW').value = c[2] - c[0];
 }
 function cropDraw() {
   const cv = $('cropCv'), g = cv.getContext('2d'), img = crop.it.img, k = crop.k;
   g.clearRect(0, 0, cv.width, cv.height); g.drawImage(img, 0, 0, cv.width, cv.height);
-  const { cells, exact } = gridCells(); crop.cells = cells;
-  g.lineWidth = 2; g.strokeStyle = '#3ecf8e'; g.textBaseline = 'top'; g.font = 'bold 14px Arial';
-  cells.forEach(([x0, y0, x1, y1], i) => {
-    g.strokeRect(x0*k, y0*k, (x1-x0+1)*k, (y1-y0+1)*k);
-    g.fillStyle = '#3ecf8e'; g.fillRect(x0*k, y0*k, 26, 22); g.fillStyle = '#06210f'; g.fillText(i + 1, x0*k + 8, y0*k + 4);
+  g.textBaseline = 'top'; g.font = 'bold 14px Arial';
+  crop.cells.forEach(([x0, y0, x1, y1], i) => {
+    const on = i === crop.sel;
+    g.fillStyle = on ? 'rgba(79,140,255,.18)' : 'rgba(62,207,142,.10)'; g.fillRect(x0*k, y0*k, (x1-x0)*k, (y1-y0)*k);
+    g.strokeStyle = on ? '#4f8cff' : '#3ecf8e'; g.lineWidth = on ? 3 : 2; g.strokeRect(x0*k, y0*k, (x1-x0)*k, (y1-y0)*k);
+    g.fillStyle = on ? '#4f8cff' : '#3ecf8e'; g.fillRect(x0*k + 3, y0*k + 3, 26, 22); g.fillStyle = on ? '#fff' : '#06210f'; g.fillText(i + 1, x0*k + 11, y0*k + 7);
   });
-  $('cropInfo').textContent = `${cells.length} imagen${cells.length === 1 ? '' : 'es'} · ${exact ? 'cortes por los espacios vacíos' : 'partes iguales'}`;
-  $('cropOk').textContent = `Crear ${cells.length} imagen${cells.length === 1 ? '' : 'es'}`;
+  $('cropInfo').textContent = `${crop.cells.length} imagen${crop.cells.length === 1 ? '' : 'es'}`;
+  $('cropOk').textContent = `Crear ${crop.cells.length} imagen${crop.cells.length === 1 ? '' : 'es'}`;
+  panelUpdate();
+}
+// borde bajo el cursor: devuelve {i, e} con e = 0 izq, 1 arriba, 2 der, 3 abajo
+function edgeHit(x, y) {
+  const tol = 9 / crop.k; let best = null, bd = tol;
+  const order = [crop.sel, ...crop.cells.keys()].filter((v, i, a) => a.indexOf(v) === i);
+  for (const i of order) {
+    const [x0, y0, x1, y1] = crop.cells[i], inX = x >= x0 - tol && x <= x1 + tol, inY = y >= y0 - tol && y <= y1 + tol;
+    const cand = [[0, Math.abs(x - x0), inY], [2, Math.abs(x - x1), inY], [1, Math.abs(y - y0), inX], [3, Math.abs(y - y1), inX]];
+    for (const [e, d, ok] of cand) if (ok && d < bd) { bd = d; best = { i, e }; }
+  }
+  return best;
+}
+const EDGE_AXIS = [0, 1, 0, 1];   // 0 = eje X, 1 = eje Y
+function dragEdge(i, e, v) {
+  const link = $('gLink').checked, ax = EDGE_AXIS[e], lim = ax ? crop.h : crop.w;
+  const part = [{ i, e }];
+  if (link) {                      // bordes vecinos que tocan este (misma posicion y que se solapan en el otro eje)
+    const c = crop.cells[i], cur = c[e], oe = (e + 2) % 4, o0 = ax ? 0 : 1, o1 = ax ? 2 : 3;
+    crop.cells.forEach((d, j) => {
+      if (j === i) return;
+      const overlap = Math.min(c[o1], d[o1]) - Math.max(c[o0], d[o0]);
+      if (overlap > MINSZ) {
+        if (Math.abs(d[oe] - cur) <= 2) part.push({ i: j, e: oe });
+        else if (Math.abs(d[e] - cur) <= 2 && (e === 0 || e === 1)) part.push({ i: j, e });
+      }
+    });
+  }
+  let lo = 0, hi = lim;
+  for (const p of part) {
+    const c = crop.cells[p.i];
+    if (p.e < 2) hi = Math.min(hi, c[p.e + 2] - MINSZ); else lo = Math.max(lo, c[p.e - 2] + MINSZ);
+  }
+  v = Math.round(Math.max(lo, Math.min(hi, v)));
+  part.forEach(p => crop.cells[p.i][p.e] = v);
+}
+(() => {
+  const cv = $('cropCv');
+  const pt = e => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) * cv.width / b.width / crop.k, (e.clientY - b.top) * cv.height / b.height / crop.k]; };
+  cv.addEventListener('pointerdown', e => {
+    const [x, y] = pt(e), h = edgeHit(x, y);
+    if (h) { crop.sel = h.i; crop.drag = h; cv.setPointerCapture(e.pointerId); }
+    else { const j = crop.cells.findIndex(([x0, y0, x1, y1]) => x >= x0 && x <= x1 && y >= y0 && y <= y1); if (j >= 0) crop.sel = j; }
+    cropDraw();
+  });
+  cv.addEventListener('pointermove', e => {
+    const [x, y] = pt(e);
+    if (!crop.drag) { const h = edgeHit(x, y); cv.style.cursor = h ? (EDGE_AXIS[h.e] ? 'ns-resize' : 'ew-resize') : 'default'; return; }
+    dragEdge(crop.drag.i, crop.drag.e, EDGE_AXIS[crop.drag.e] ? y : x);
+    cropDraw();
+  });
+  cv.addEventListener('pointerup', () => { crop.drag = null; });
+})();
+// Medidas numericas de la imagen elegida
+$('cH').addEventListener('input', () => { const c = crop.cells[crop.sel], v = parseInt($('cH').value); if (c && v >= MINSZ) { c[3] = Math.min(crop.h, c[1] + v); cropDraw(); } });
+$('cW').addEventListener('input', () => { const c = crop.cells[crop.sel], v = parseInt($('cW').value); if (c && v >= MINSZ) { c[2] = Math.min(crop.w, c[0] + v); cropDraw(); } });
+$('cHAll').onclick = () => {
+  const ref = crop.cells[crop.sel]; if (!ref) return; const hh = ref[3] - ref[1];
+  crop.cells.forEach(c => { c[3] = Math.min(crop.h, c[1] + hh); }); cropDraw();
+};
+function trimCell(img, [x0, y0, x1, y1]) {      // quita bordes de fondo liso alrededor del contenido
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, x0, y0, w, h, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data, br = d[0], bg = d[1], bb = d[2], ba = d[3];
+  let mx0 = w, my0 = h, mx1 = -1, my1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y*w + x) * 4;
+    const isBg = ba < 10 ? d[i+3] < 10 : (d[i+3] >= 10 && Math.abs(d[i]-br) + Math.abs(d[i+1]-bg) + Math.abs(d[i+2]-bb) < 60);
+    if (!isBg) { if (x < mx0) mx0 = x; if (x > mx1) mx1 = x; if (y < my0) my0 = y; if (y > my1) my1 = y; }
+  }
+  if (mx1 < 0 || mx1 - mx0 < 20 || my1 - my0 < 20) return [x0, y0, x1, y1];
+  return [x0 + mx0, y0 + my0, x0 + mx1, y0 + my1];
 }
 function openCrop() {
   if (!selected) return;
-  crop.it = selected;
-  const img = selected.img, iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  crop.it = selected; crop.sel = 0;
+  const img = selected.img; crop.w = img.naturalWidth || img.width; crop.h = img.naturalHeight || img.height;
   crop.parts = findParts(img);                       // intenta detectar los huecos entre imagenes
-  if (crop.parts.length >= 2) {                      // autocompleta filas/columnas segun lo detectado
+  if (crop.parts.length >= 2) {
     const first = crop.parts[0], cols = crop.parts.filter(p => p[1] <= first[3]).length;
     $('gCols').value = cols; $('gRows').value = Math.ceil(crop.parts.length / cols);
   }
-  crop.k = Math.min(1, (innerWidth - 40) / iw, (innerHeight - 190) / ih);
-  const cv = $('cropCv'); cv.width = Math.round(iw * crop.k); cv.height = Math.round(ih * crop.k);
+  crop.k = Math.min(1, (innerWidth - 40) / crop.w, (innerHeight - 250) / crop.h);
+  const cv = $('cropCv'); cv.width = Math.round(crop.w * crop.k); cv.height = Math.round(crop.h * crop.k);
+  initCells();
   $('cropModal').style.display = 'flex'; cropDraw();
 }
 const closeCrop = () => { $('cropModal').style.display = 'none'; crop.it = null; };
-['gRows','gCols'].forEach(id => $(id).addEventListener('input', () => crop.it && cropDraw()));
+['gRows','gCols'].forEach(id => $(id).addEventListener('input', () => { if (crop.it) { initCells(); cropDraw(); } }));
+$('gReset').onclick = () => { if (crop.it) { crop.parts = []; initCells(); cropDraw(); } };
 $('cropCancel').onclick = closeCrop;
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && crop.it) closeCrop(); });
 $('cropBtn').onclick = openCrop;
 $('cropOk').onclick = async () => {
-  const it = crop.it, cells = crop.cells.slice(), del = $('cropDel').checked; closeCrop();
+  const it = crop.it, trim = $('gTrim').checked, del = $('cropDel').checked;
+  const cells = crop.cells.map(([x0, y0, x1, y1]) => { const c = [x0, y0, x1 - 1, y1 - 1]; return trim ? trimCell(it.img, c) : c; });
+  closeCrop();
   for (let i = 0; i < cells.length; i++) await addImage(await cropBlob(it.img, cells[i]), `${it.name}_${i + 1}`, true);
   if (del && items.includes(it)) it.card.querySelector('button.sec').click();
   toast(`✂ ${cells.length} imágenes creadas en orden. Cada una lleva su propia fecha y hora.`);
@@ -455,18 +557,25 @@ $('cropOk').onclick = async () => {
 const toMin = v => { const [h, m] = v.split(':').map(Number); return h*60 + m; };
 const fromMin = r => `${pad(Math.floor(r/60))}:${pad(r%60)}`;
 const rndInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
-function rangeRandom() {
+let capped = false;
+function rangeBounds() {
   const a = toMin($('tFrom').value || '14:00'); let b = toMin($('tTo').value || '15:00');
-  if (b < a) b += 1440;
-  return fromMin(rndInt(a, b) % 1440);
+  if (b < a) b += 1440;                       // rango que cruza la medianoche
+  return [a, b];
 }
-function nextTime(prev) {
-  if (!prev) return rangeRandom();
+// Devuelve minutos absolutos (pueden pasar de 1440 si el rango cruza medianoche); nunca supera la hora limite
+function nextAbs(prevAbs) {
+  const [a, b] = rangeBounds();
+  if (prevAbs == null) return rndInt(a, b);
   let lo = Math.max(1, parseInt($('stepMin').value) || 10), hi = Math.max(1, parseInt($('stepMax').value) || 20);
   if (hi < lo) [lo, hi] = [hi, lo];
-  return fromMin(Math.min(toMin(prev) + rndInt(lo, hi), 1439));   // tope 23:59 para no volver atras
+  const v = prevAbs + rndInt(lo, hi);
+  if (v > b) { capped = true; return Math.max(b, prevAbs); }   // se queda en la hora limite
+  return v;
 }
-function assignAll() { items.forEach((it, i) => it.time = nextTime(i ? items[i-1].time : null)); }
+function setTime(it, abs) { it.abs = abs; it.time = fromMin(abs % 1440); }
+function assignAll() { capped = false; items.forEach((it, i) => setTime(it, nextAbs(i ? items[i-1].abs : null))); if (capped) warnCap(); }
+function warnCap() { toast('⏱ Se llegó a la hora límite (' + $('tTo').value + '): las imágenes restantes quedan con esa hora.'); }
 
 function addImage(blob, name, noSplit) {
   return new Promise(resolve => {
@@ -490,7 +599,7 @@ function addImage(blob, name, noSplit) {
       it.card = card; it.dlBtn = b1;
       const badge = document.createElement('div'); badge.className = 'badge'; it.badge = badge;
       row.append(label, b1, b2); card.append(it.canvas, badge, row); $('grid').append(card);
-      it.label = label; it.time = nextTime(items.length ? items[items.length-1].time : null);
+      it.label = label; capped = false; setTime(it, nextAbs(items.length ? items[items.length-1].abs : null)); if (capped) warnCap();
       items.push(it); render(it); updateUI(); select(it); resolve();
     };
     img.onerror = resolve;
