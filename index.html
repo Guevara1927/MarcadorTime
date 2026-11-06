@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marcador de Fechas</title>
+<style>
+  :root { --bg:#14161a; --panel:#1e2128; --text:#e8eaed; --muted:#8b93a1; --accent:#4f8cff; --ok:#3ecf8e; --danger:#e5484d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; flex-direction:column; }
+  header { padding:14px 20px; background:var(--panel); display:flex; gap:14px; align-items:center; flex-wrap:wrap; position:sticky; top:0; z-index:5; }
+  header h1 { font-size:18px; margin:0; margin-right:auto; }
+  label { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  input[type=date], select { background:var(--bg); color:var(--text); border:1px solid #333a46; border-radius:6px; padding:7px 9px; font-size:14px; }
+  input[type=date]:focus { outline:2px solid var(--accent); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 14px; font-size:14px; cursor:pointer; }
+  button.sec { background:#2c313b; }
+  button.danger { background:var(--danger); }
+  button:disabled { opacity:.35; cursor:default; }
+  main { flex:1; padding:20px; display:flex; flex-direction:column; gap:14px; }
+  #bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  #count { color:var(--muted); font-size:14px; margin-right:auto; }
+  #status { color:var(--ok); font-size:14px; min-height:18px; }
+  #drop { border:2px dashed #3a4150; border-radius:12px; padding:60px 30px; text-align:center; color:var(--muted); max-width:560px; margin:40px auto; }
+  #drop b { color:var(--text); }
+  #grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:14px; }
+  .card { background:var(--panel); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:8px; }
+  .card { cursor:pointer; border:2px solid transparent; }
+  .card.sel { border-color:var(--accent); }
+  #up { display:flex; gap:8px; align-items:center; background:var(--panel); padding:6px 10px; border-radius:8px; opacity:.45; }
+  #up.on { opacity:1; }
+  .tin { background:var(--bg); color:var(--text); border:1px solid #333a46; border-radius:6px; padding:6px 8px; font-size:14px; }
+  .badge { display:none; font-size:12px; background:#123d2b; color:var(--ok); border-radius:6px; padding:4px 8px; }
+  .card.up .badge { display:block; }
+  .card.up { border-color:var(--ok); }
+  .card.up.sel { border-color:var(--accent); }
+  .card.busy .badge { display:block; background:#3d3512; color:#ffd400; }
+  .card button.ready { background:var(--ok); color:#06210f; font-weight:600; animation:pulse 1s ease-in-out 4; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 6px #3ecf8e55; } }
+  #toast { white-space:pre-line; position:fixed; right:20px; bottom:20px; background:#123d2b; color:#d6ffe9; border:1px solid var(--ok); border-radius:10px; padding:12px 16px; max-width:340px; font-size:14px; box-shadow:0 6px 24px #0009; opacity:0; transform:translateY(12px); transition:.25s; pointer-events:none; z-index:20; }
+  #toast.show { opacity:1; transform:none; }
+  .card canvas { width:100%; height:auto; border-radius:6px; display:block; }
+  .card .row { display:flex; gap:6px; align-items:center; }
+  .card .name { flex:1; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card button { padding:5px 10px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📅 Marcador de Fechas</h1>
+  <label>Fecha <input type="date" id="date"></label>
+  <label>Formato
+    <select id="fmt">
+      <option value="dmy">05/11/2026</option>
+      <option value="dmy2">05/11/26</option>
+      <option value="dmyd">05-11-2026</option>
+      <option value="dmyp">05.11.2026</option>
+      <option value="ymd">2026-11-05</option>
+      <option value="ymds">2026/11/05</option>
+      <option value="mdy">11/05/2026</option>
+      <option value="long">5 nov 2026</option>
+      <option value="longfull">5 de noviembre de 2026</option>
+      <option value="dayname">jueves 5 nov 2026</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="useTime"> Hora</label>
+  <label><input type="time" id="time" disabled style="background:var(--bg);color:var(--text);border:1px solid #333a46;border-radius:6px;padding:6px 8px;font-size:14px">
+    <select id="hfmt" disabled>
+      <option value="24">24 h</option>
+      <option value="12">12 h (AM/PM)</option>
+    </select>
+    <button type="button" class="sec" id="nowBtn" disabled title="Usar la hora actual" style="padding:5px 9px">Ahora</button>
+  </label>
+  <label>Rango
+    <input type="time" id="tFrom" value="14:00" disabled class="tin"> a
+    <input type="time" id="tTo" value="15:00" disabled class="tin">
+    <button type="button" id="rndBtn" disabled title="Elige una hora al azar dentro del rango" style="padding:5px 9px">🎲 Aleatoria</button>
+  </label>
+  <label title="La 1.ª imagen toma una hora al azar del rango; cada siguiente suma entre X e Y minutos a la anterior">
+    <input type="checkbox" id="seqOn" disabled> Horas consecutivas: +
+    <input type="number" id="stepMin" class="tin" value="10" min="1" max="600" style="width:56px" disabled> a
+    <input type="number" id="stepMax" class="tin" value="20" min="1" max="600" style="width:56px" disabled> min
+    <button type="button" class="sec" id="reseq" disabled style="padding:5px 9px">Reasignar horas</button>
+  </label>
+  <label>Estilo
+    <select id="sty">
+      <option value="dark">Texto blanco / fondo negro</option>
+      <option value="light">Texto negro / fondo blanco</option>
+      <option value="yellow">Texto amarillo / fondo negro</option>
+      <option value="orange">Estilo cámara (naranja, sin fondo)</option>
+      <option value="white">Blanco con sombra (sin fondo)</option>
+      <option value="red">Texto blanco / fondo rojo</option>
+    </select>
+  </label>
+  <label>Tamaño
+    <select id="siz">
+      <option value="0.03">Pequeño</option>
+      <option value="0.045" selected>Medio</option>
+      <option value="0.065">Grande</option>
+      <option value="0.09">Muy grande</option>
+    </select>
+  </label>
+  <label>Posición
+    <select id="pos">
+      <option value="br">Abajo derecha</option>
+      <option value="bl">Abajo izquierda</option>
+      <option value="tr">Arriba derecha</option>
+      <option value="tl">Arriba izquierda</option>
+    </select>
+  </label>
+</header>
+
+<main>
+  <div id="bar">
+    <button id="pick">📁 Seleccionar imágenes</button>
+    <input type="file" id="file" accept="image/*" multiple hidden>
+    <button id="cropBtn" disabled title="Divide el conjunto en N imágenes por orden, sin dibujar nada">✂ Dividir en grilla</button>
+    <button id="split" class="sec" disabled title="Separa la imagen seleccionada en varias, cortando por los espacios vacíos entre ellas">✂ Separar seleccionada</button>
+    <label title="Al pegar, si la imagen trae varias separadas por espacio vacío, las divide en tarjetas distintas"><input type="checkbox" id="autoSplit"> Separar al pegar</label>
+    <span id="count">0 imágenes</span>
+    <div id="up">
+      <label>Upscale (imagen seleccionada)
+        <select id="scale" disabled>
+          <option value="1">Original (1x)</option>
+          <option value="2">2x</option>
+          <option value="3">3x</option>
+          <option value="4">4x</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="sharp" disabled> Nitidez</label>
+      <span id="dims" style="font-size:12px;color:var(--muted)">Haz clic en una imagen para seleccionarla</span>
+    </div>
+    <button id="dlAll" disabled>⬇ Descargar todas</button>
+    <button id="clear" class="danger" disabled>🗑 Vaciar todas</button>
+  </div>
+  <div id="status"></div>
+  <div id="diag" style="font-size:12px;color:var(--muted);word-break:break-all"></div>
+  <div id="drop">
+    <p><b>Ctrl + V</b> para pegar imágenes (puedes pegar una tras otra)</p>
+    <p>O usa el botón <b>Seleccionar imágenes</b> / arrastra varios archivos a la vez.<br>La fecha se aplica a todas y puedes cambiarla en cualquier momento.</p>
+  </div>
+  <div id="grid"></div>
+</main>
+
+<div id="cropModal" style="display:none;position:fixed;inset:0;background:#000d;z-index:30;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px">
+  <div style="color:#fff;font-size:15px;text-align:center">Indica en cuántas imágenes dividir el conjunto. Se numeran en <b>orden de lectura</b> (izquierda→derecha, arriba→abajo).</div>
+  <canvas id="cropCv" style="max-width:100%;border-radius:4px"></canvas>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;color:#ccc;font-size:14px">
+    <label style="color:#ccc">Filas <input type="number" id="gRows" class="tin" min="1" max="12" value="3" style="width:60px"></label>
+    <label style="color:#ccc">Columnas <input type="number" id="gCols" class="tin" min="1" max="12" value="1" style="width:60px"></label>
+    <span id="cropInfo"></span>
+    <label style="color:#ccc"><input type="checkbox" id="cropDel" checked> Quitar la original</label>
+    <button id="cropCancel" class="sec">Cancelar</button>
+    <button id="cropOk">Crear imágenes</button>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2,'0');
+const store = { get:k=>{try{return localStorage.getItem(k)}catch{return null}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}} };
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const SETTINGS = ['fmt','pos','sty','siz'];
+
+$('date').value = store.get('mf_date') || iso(new Date());
+SETTINGS.forEach(id => { const v = store.get('mf_'+id); if (v) $(id).value = v; if ($(id).selectedIndex < 0) $(id).selectedIndex = 0; });
+const nowHM = () => { const n = new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
+$('time').value = store.get('mf_time') || nowHM();
+$('hfmt').value = store.get('mf_hfmt') || '24';
+$('useTime').checked = store.get('mf_useTime') === '1';
+$('tFrom').value = store.get('mf_tFrom') || '14:00';
+$('tTo').value = store.get('mf_tTo') || '15:00';
+const TIME_CTRLS = ['time','hfmt','nowBtn','tFrom','tTo','rndBtn','seqOn','stepMin','stepMax','reseq'];
+function syncTimeUI() { TIME_CTRLS.forEach(id => $(id).disabled = !$('useTime').checked); }
+syncTimeUI();
+
+const items = [];   // {img, name, canvas, card}
+let seq = 0;
+
+const seqActive = () => $('seqOn').checked && $('useTime').checked;
+function formatTime(v) {
+  v = v === undefined ? $('time').value : v;
+  if (!$('useTime').checked || !v) return '';
+  const [H, M] = v.split(':').map(Number);
+  if ($('hfmt').value === '12') return `${H % 12 || 12}:${pad(M)} ${H < 12 ? 'AM' : 'PM'}`;
+  return `${pad(H)}:${pad(M)}`;
+}
+function formatDate(it) {
+  const d = formatDay(), t = formatTime(seqActive() && it && it.time ? it.time : undefined);
+  return d && t ? `${d} ${t}` : d || t;
+}
+function formatDay() {
+  const [y,m,d] = $('date').value.split('-');
+  if (!y) return '';
+  const ab = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const full = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const days = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  const dow = days[new Date(+y, +m-1, +d).getDay()];
+  const now = new Date();
+  switch ($('fmt').value) {
+    case 'dmy2': return `${d}/${m}/${y.slice(2)}`;
+    case 'dmyd': return `${d}-${m}-${y}`;
+    case 'dmyp': return `${d}.${m}.${y}`;
+    case 'ymd': return `${y}-${m}-${d}`;
+    case 'ymds': return `${y}/${m}/${d}`;
+    case 'mdy': return `${m}/${d}/${y}`;
+    case 'long': return `${+d} ${ab[+m-1]} ${y}`;
+    case 'longfull': return `${+d} de ${full[+m-1]} de ${y}`;
+    case 'dayname': return `${dow} ${+d} ${ab[+m-1]} ${y}`;
+    default: return `${d}/${m}/${y}`;
+  }
+}
+
+const STYLES = {
+  dark:   {bg:'rgba(0,0,0,.65)', fg:'#fff'},
+  light:  {bg:'rgba(255,255,255,.85)', fg:'#000'},
+  yellow: {bg:'rgba(0,0,0,.65)', fg:'#ffd400'},
+  orange: {bg:null, fg:'#ff8c1a', shadow:'rgba(0,0,0,.7)'},
+  white:  {bg:null, fg:'#fff', shadow:'rgba(0,0,0,.9)'},
+  red:    {bg:'rgba(200,20,20,.85)', fg:'#fff'},
+};
+
+function render(it) {
+  const { img, canvas: cv } = it, ctx = cv.getContext('2d');
+  const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
+  let k = it.scale || 1;
+  const MAXPX = 100e6, MAXSIDE = 16000;   // límites seguros del navegador
+  while (k > 1 && (sw*k > MAXSIDE || sh*k > MAXSIDE || sw*k*sh*k > MAXPX)) k--;
+  it.eff = k;
+  const tw = Math.round(sw*k), th = Math.round(sh*k);
+  if (k === 1) {
+    cv.width = sw; cv.height = sh; ctx.drawImage(img, 0, 0);
+  } else {
+    // escalado en pasos de ×2 con suavizado de alta calidad (mejor que un salto único)
+    let src = img, cw = sw, ch = sh;
+    while (cw < tw || ch < th) {
+      const nw = Math.min(tw, cw*2), nh = Math.min(th, ch*2);
+      const tmp = document.createElement('canvas'); tmp.width = nw; tmp.height = nh;
+      const t = tmp.getContext('2d'); t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'high';
+      t.drawImage(src, 0, 0, nw, nh); src = tmp; cw = nw; ch = nh;
+    }
+    cv.width = tw; cv.height = th; ctx.drawImage(src, 0, 0);
+  }
+  if (it.sharp && k > 1) sharpen(ctx, cv.width, cv.height);
+  const text = formatDate(it); if (it.label) it.label.textContent = it.name + (seqActive() && it.time ? ' · ' + it.time : ''); if (!text) return;
+  const size = Math.max(16, Math.round(Math.min(cv.width, cv.height) * parseFloat($('siz').value)));
+  const m = Math.round(size * 0.6), p = Math.round(size * 0.35);
+  ctx.font = `bold ${size}px Arial, sans-serif`; ctx.textBaseline = 'top';
+  const w = ctx.measureText(text).width, h = size, pos = $('pos').value;
+  const x = pos.endsWith('r') ? cv.width - w - 2*p - m : m;
+  const y = pos.startsWith('b') ? cv.height - h - 2*p - m : m;
+  const S = STYLES[$('sty').value];
+  if (S.bg) { ctx.fillStyle = S.bg; ctx.fillRect(x, y, w + 2*p, h + 2*p); }
+  if (S.shadow) { ctx.shadowColor = S.shadow; ctx.shadowBlur = size * 0.2; ctx.shadowOffsetX = ctx.shadowOffsetY = size * 0.06; }
+  ctx.fillStyle = S.fg; ctx.fillText(text, x + p, y + p);
+  ctx.shadowColor = 'transparent';
+}
+const renderAll = () => { items.forEach(render); if (typeof showDims === 'function') showDims(); };
+
+// Máscara de enfoque 3x3 (realza bordes tras ampliar)
+function sharpen(ctx, w, h) {
+  const src = ctx.getImageData(0, 0, w, h), d = src.data, out = ctx.createImageData(w, h), o = out.data;
+  const a = 0.6; // intensidad
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y*w + x)*4;
+    for (let c = 0; c < 3; c++) {
+      const up = d[(Math.max(y-1,0)*w + x)*4 + c], dn = d[(Math.min(y+1,h-1)*w + x)*4 + c];
+      const lf = d[(y*w + Math.max(x-1,0))*4 + c], rt = d[(y*w + Math.min(x+1,w-1))*4 + c];
+      const v = d[i+c]*(1 + 4*a) - a*(up + dn + lf + rt);
+      o[i+c] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+    o[i+3] = d[i+3];
+  }
+  ctx.putImageData(out, 0, 0);
+}
+
+// Selección de imagen
+let selected = null;
+function select(it) {
+  selected = it;
+  items.forEach(x => x.card.classList.toggle('sel', x === it));
+  $('up').classList.toggle('on', !!it);
+  $('scale').disabled = $('sharp').disabled = $('split').disabled = $('cropBtn').disabled = !it;
+  if (it) { $('scale').value = it.scale || 1; $('sharp').checked = !!it.sharp; }
+  showDims();
+}
+function showDims() {
+  if (!selected) { $('dims').textContent = 'Haz clic en una imagen para seleccionarla'; return; }
+  const c = selected.canvas;
+  $('dims').textContent = `${c.width}×${c.height}px` + (selected.eff < (selected.scale||1) ? ' (limitado por memoria)' : '');
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 5000);
+}
+function applyUpscale() {
+  const it = selected; if (!it) return;
+  it.scale = parseInt($('scale').value); it.sharp = $('sharp').checked;
+  it.dlBtn.classList.remove('ready');
+  if (it.scale === 1) {                       // volvió al original
+    it.card.classList.remove('up', 'busy'); it.dlBtn.title = 'Descargar';
+    render(it); showDims(); return;
+  }
+  it.badge.textContent = '⏳ Aplicando upscale…';
+  it.card.classList.add('busy', 'up');
+  setTimeout(() => {                          // deja pintar el aviso antes del cálculo
+    render(it); showDims();
+    it.card.classList.remove('busy');
+    const c = it.canvas, msg = `⬆ Upscale ${it.eff}x aplicado · ${c.width}×${c.height}px · listo para descargar con el botón verde ⬇`;
+    it.badge.textContent = '✔ ' + msg.slice(2);
+    it.dlBtn.classList.add('ready'); it.dlBtn.title = 'Descargar imagen con upscale';
+    it.card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    $('status').style.color = ''; $('status').textContent = `✔ "${it.name}": ${msg}`;
+    toast(`✔ Upscale ${it.eff}x listo (${c.width}×${c.height}px).\nDescárgala con el botón verde ⬇ de la imagen, o con "Descargar todas".`);
+  }, 30);
+}
+$('scale').onchange = $('sharp').onchange = applyUpscale;
+
+function updateUI() {
+  const n = items.length;
+  $('count').textContent = n === 1 ? '1 imagen' : `${n} imágenes`;
+  $('dlAll').disabled = $('clear').disabled = n === 0;
+  $('drop').style.display = n ? 'none' : '';
+}
+
+function fileName(it) { return `${it.name}_${$('date').value}.png`; }
+
+function saveBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+const toBlob = cv => new Promise(res => cv.toBlob(res, 'image/png'));
+
+// ---- Separar una imagen "en conjunto" en varias, cortando por espacios vacíos (XY-cut) ----
+function findParts(img) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, w, h).data;
+  const br = d[0], bg = d[1], bb = d[2], ba = d[3];
+  const mask = new Uint8Array(w * h);                       // 1 = contenido, 0 = fondo
+  for (let i = 0, p = 0; p < mask.length; p++, i += 4) {
+    const bgPix = ba < 10 ? d[i+3] < 10 : (d[i+3] >= 10 && Math.abs(d[i]-br) + Math.abs(d[i+1]-bg) + Math.abs(d[i+2]-bb) < 60);
+    mask[p] = bgPix ? 0 : 1;
+  }
+  const minGap = Math.max(10, Math.round(Math.min(w, h) * 0.02)), minSize = 40;
+  const segs = (occ, gap) => {                              // tramos ocupados separados por huecos >= gap
+    const out = []; let start = -1, last = -1;
+    for (let i = 0; i < occ.length; i++) if (occ[i]) { if (start < 0) start = i; else if (i - last > gap) { out.push([start, last]); start = i; } last = i; }
+    if (start >= 0) out.push([start, last]);
+    return out;
+  };
+  const cut = (x0, y0, x1, y1, axis, depth) => {            // axis 0: cortar por filas, 1: por columnas
+    const len = axis === 0 ? y1 - y0 + 1 : x1 - x0 + 1, occ = new Uint8Array(len);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (mask[y*w + x]) occ[axis === 0 ? y - y0 : x - x0] = 1;
+    const s = segs(occ, minGap);
+    if (!s.length) return [];
+    if (s.length === 1 && (depth >= 2 || axis === 1 && depth > 0)) {
+      return [[x0 + (axis === 1 ? s[0][0] : 0), y0 + (axis === 0 ? s[0][0] : 0),
+               axis === 1 ? x0 + s[0][1] : x1, axis === 0 ? y0 + s[0][1] : y1]];
+    }
+    let res = [];
+    for (const [a, b] of s) {
+      const r = axis === 0 ? [x0, y0 + a, x1, y0 + b] : [x0 + a, y0, x0 + b, y1];
+      if (s.length === 1 && depth >= 1) { res.push(r); continue; }
+      res = res.concat(depth < 4 ? cut(r[0], r[1], r[2], r[3], 1 - axis, depth + 1) : [r]);
+    }
+    return res;
+  };
+  let parts = cut(0, 0, w - 1, h - 1, 0, 0);
+  // recorta cada parte a su contenido real y descarta las diminutas
+  parts = parts.map(([x0, y0, x1, y1]) => {
+    let mx0 = x1, my0 = y1, mx1 = x0, my1 = y0;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (mask[y*w + x]) { if (x < mx0) mx0 = x; if (x > mx1) mx1 = x; if (y < my0) my0 = y; if (y > my1) my1 = y; }
+    return [mx0, my0, mx1, my1];
+  }).filter(([x0, y0, x1, y1]) => x1 - x0 >= minSize && y1 - y0 >= minSize);
+  return parts.map(([x0, y0, x1, y1]) => {
+    const pad = Math.min(6, x0, y0, w - 1 - x1, h - 1 - y1);
+    return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
+  });
+}
+function cropBlob(img, [x0, y0, x1, y1]) {
+  const c = document.createElement('canvas'); c.width = x1 - x0 + 1; c.height = y1 - y0 + 1;
+  c.getContext('2d').drawImage(img, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+  return toBlob(c);
+}
+async function splitInto(img, baseName) {
+  const parts = findParts(img);
+  if (parts.length < 2) return 0;
+  for (let i = 0; i < parts.length; i++) await addImage(await cropBlob(img, parts[i]), `${baseName}_${i + 1}`, true);
+  return parts.length;
+}
+$('autoSplit').checked = store.get('mf_autoSplit') === '1';
+$('autoSplit').onchange = () => store.set('mf_autoSplit', $('autoSplit').checked ? '1' : '0');
+$('split').onclick = async () => {
+  const it = selected; if (!it) return;
+  const n = await splitInto(it.img, it.name);
+  if (!n) { toast('No encontré espacios vacíos para separar esta imagen.\nSolo se separa si las imágenes tienen un hueco de fondo liso entre ellas.'); return; }
+  it.card.querySelector('button.sec').click();               // quita la original
+  toast(`✂ Separada en ${n} imágenes.`);
+};
+
+// ---- Dividir en grilla: N imagenes en orden de lectura ----
+const crop = { it: null, cells: [], k: 1, parts: [] };
+function gridCells() {
+  const img = crop.it.img, w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const R = Math.max(1, Math.min(12, parseInt($('gRows').value) || 1)), C = Math.max(1, Math.min(12, parseInt($('gCols').value) || 1));
+  // Si los huecos en blanco entre imagenes coinciden con la cantidad pedida, usa esos cortes exactos
+  if (crop.parts.length === R * C) return { cells: crop.parts, exact: true };
+  const cells = [];
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++)
+    cells.push([Math.round(c*w/C), Math.round(r*h/R), Math.round((c+1)*w/C) - 1, Math.round((r+1)*h/R) - 1]);
+  return { cells, exact: false };
+}
+function cropDraw() {
+  const cv = $('cropCv'), g = cv.getContext('2d'), img = crop.it.img, k = crop.k;
+  g.clearRect(0, 0, cv.width, cv.height); g.drawImage(img, 0, 0, cv.width, cv.height);
+  const { cells, exact } = gridCells(); crop.cells = cells;
+  g.lineWidth = 2; g.strokeStyle = '#3ecf8e'; g.textBaseline = 'top'; g.font = 'bold 14px Arial';
+  cells.forEach(([x0, y0, x1, y1], i) => {
+    g.strokeRect(x0*k, y0*k, (x1-x0+1)*k, (y1-y0+1)*k);
+    g.fillStyle = '#3ecf8e'; g.fillRect(x0*k, y0*k, 26, 22); g.fillStyle = '#06210f'; g.fillText(i + 1, x0*k + 8, y0*k + 4);
+  });
+  $('cropInfo').textContent = `${cells.length} imagen${cells.length === 1 ? '' : 'es'} · ${exact ? 'cortes por los espacios vacíos' : 'partes iguales'}`;
+  $('cropOk').textContent = `Crear ${cells.length} imagen${cells.length === 1 ? '' : 'es'}`;
+}
+function openCrop() {
+  if (!selected) return;
+  crop.it = selected;
+  const img = selected.img, iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  crop.parts = findParts(img);                       // intenta detectar los huecos entre imagenes
+  if (crop.parts.length >= 2) {                      // autocompleta filas/columnas segun lo detectado
+    const first = crop.parts[0], cols = crop.parts.filter(p => p[1] <= first[3]).length;
+    $('gCols').value = cols; $('gRows').value = Math.ceil(crop.parts.length / cols);
+  }
+  crop.k = Math.min(1, (innerWidth - 40) / iw, (innerHeight - 190) / ih);
+  const cv = $('cropCv'); cv.width = Math.round(iw * crop.k); cv.height = Math.round(ih * crop.k);
+  $('cropModal').style.display = 'flex'; cropDraw();
+}
+const closeCrop = () => { $('cropModal').style.display = 'none'; crop.it = null; };
+['gRows','gCols'].forEach(id => $(id).addEventListener('input', () => crop.it && cropDraw()));
+$('cropCancel').onclick = closeCrop;
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && crop.it) closeCrop(); });
+$('cropBtn').onclick = openCrop;
+$('cropOk').onclick = async () => {
+  const it = crop.it, cells = crop.cells.slice(), del = $('cropDel').checked; closeCrop();
+  for (let i = 0; i < cells.length; i++) await addImage(await cropBlob(it.img, cells[i]), `${it.name}_${i + 1}`, true);
+  if (del && items.includes(it)) it.card.querySelector('button.sec').click();
+  toast(`✂ ${cells.length} imágenes creadas en orden. Cada una lleva su propia fecha y hora.`);
+};
+
+// ---- Horas consecutivas: 1.ª al azar en el rango; las siguientes = anterior + 10-20 min (nunca menor) ----
+const toMin = v => { const [h, m] = v.split(':').map(Number); return h*60 + m; };
+const fromMin = r => `${pad(Math.floor(r/60))}:${pad(r%60)}`;
+const rndInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+function rangeRandom() {
+  const a = toMin($('tFrom').value || '14:00'); let b = toMin($('tTo').value || '15:00');
+  if (b < a) b += 1440;
+  return fromMin(rndInt(a, b) % 1440);
+}
+function nextTime(prev) {
+  if (!prev) return rangeRandom();
+  let lo = Math.max(1, parseInt($('stepMin').value) || 10), hi = Math.max(1, parseInt($('stepMax').value) || 20);
+  if (hi < lo) [lo, hi] = [hi, lo];
+  return fromMin(Math.min(toMin(prev) + rndInt(lo, hi), 1439));   // tope 23:59 para no volver atras
+}
+function assignAll() { items.forEach((it, i) => it.time = nextTime(i ? items[i-1].time : null)); }
+
+function addImage(blob, name, noSplit) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(blob), img = new Image();
+    img.onload = async () => {
+      if (!noSplit && $('autoSplit').checked) {
+        const base = name ? name.replace(/\.[^.]+$/, '') : `evidencia_${++seq}`;
+        const n = await splitInto(img, base);
+        if (n) { toast(`✂ La imagen traía ${n} imágenes juntas: las separé.`); return resolve(); }
+      }
+      const it = { img, canvas: document.createElement('canvas'), name: (name ? name.replace(/\.[^.]+$/, '') : `evidencia_${++seq}`) };
+      const card = document.createElement('div'); card.className = 'card';
+      const row = document.createElement('div'); row.className = 'row';
+      const label = document.createElement('span'); label.className = 'name'; label.textContent = it.name;
+      const b1 = document.createElement('button'); b1.textContent = '⬇'; b1.title = 'Descargar';
+      b1.onclick = async () => saveBlob(await toBlob(it.canvas), fileName(it));
+      const b2 = document.createElement('button'); b2.className = 'sec'; b2.textContent = '✕'; b2.title = 'Quitar';
+      b2.onclick = ev => { ev.stopPropagation(); items.splice(items.indexOf(it), 1); card.remove(); if (selected === it) select(null); updateUI(); };
+      b1.onclick = async ev => { ev.stopPropagation(); saveBlob(await toBlob(it.canvas), fileName(it)); };
+      card.onclick = () => select(it);
+      it.card = card; it.dlBtn = b1;
+      const badge = document.createElement('div'); badge.className = 'badge'; it.badge = badge;
+      row.append(label, b1, b2); card.append(it.canvas, badge, row); $('grid').append(card);
+      it.label = label; it.time = nextTime(items.length ? items[items.length-1].time : null);
+      items.push(it); render(it); updateUI(); select(it); resolve();
+    };
+    img.onerror = resolve;
+    img.src = url;
+  });
+}
+
+async function addMany(blobs) { for (const [b, n] of blobs) await addImage(b, n); }
+
+// Pegar (una o varias imágenes)
+document.addEventListener('paste', async e => {
+  const cd = e.clipboardData;
+  let files = [...cd.files].filter(f => f.type.startsWith('image/'));
+  if (!files.length) files = [...cd.items].filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+  e.preventDefault();
+  const dHtml = cd.getData('text/html') || '';
+  const nImg = (dHtml.match(/<img\b/gi) || []).length, nData = (dHtml.match(/<img[^>]+src=["']data:image/gi) || []).length;
+  $('diag').textContent = `Diagnóstico del pegado → archivos: ${cd.files.length} · items: ${[...cd.items].map(i => i.kind + ':' + i.type).join(', ') || 'ninguno'} · <img> en HTML: ${nImg} (con datos: ${nData})` + (nImg > nData ? ' · las <img> son rutas de archivo y el navegador no puede leerlas' : '');
+  $('status').style.color = ''; $('status').textContent = '';
+  if (files.length) return addMany(files.map(f => [f, files.length > 1 || f.name === 'image.png' ? null : f.name]));
+  const types = [...cd.types];
+  const html = cd.getData('text/html');          // hay que leerlo antes de cualquier await
+  try {
+    const found = [];                            // una imagen por cada elemento del portapapeles
+    for (const item of await navigator.clipboard.read()) {
+      const t = item.types.find(t => t.startsWith('image/'));
+      if (t) found.push([await item.getType(t), null]);
+    }
+    if (found.length) return addMany(found);
+  } catch {}
+  const imgs = html ? [...html.matchAll(/<img[^>]+src=["'](data:image\/[^"']+)["']/gi)].map(x => x[1]) : [];
+  if (imgs.length) {                             // varias <img> incrustadas → una tarjeta por cada una
+    const blobs = [];
+    for (const src of imgs) blobs.push([await (await fetch(src)).blob(), null]);
+    return addMany(blobs);
+  }
+  $('status').style.color = '#ff6b6b';
+  $('status').textContent = 'No se encontró imagen en el portapapeles (tipos: ' + (types.join(', ') || 'ninguno') + '). En Excel usa "Copiar como imagen" o captura con Win+Shift+S.';
+});
+
+// Seleccionar archivos con el explorador
+$('pick').onclick = () => $('file').click();
+$('file').onchange = async e => {
+  await addMany([...e.target.files].filter(f => f.type.startsWith('image/')).map(f => [f, f.name]));
+  e.target.value = '';   // permite volver a elegir los mismos archivos
+};
+
+// Arrastrar archivos
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  addMany([...e.dataTransfer.files].filter(f => f.type.startsWith('image/')).map(f => [f, f.name]));
+});
+
+// Controles
+$('date').addEventListener('input', () => { store.set('mf_date', $('date').value); renderAll(); });
+$('useTime').addEventListener('change', () => { store.set('mf_useTime', $('useTime').checked ? '1' : '0'); syncTimeUI(); renderAll(); });
+$('time').addEventListener('input', () => { store.set('mf_time', $('time').value); renderAll(); });
+$('hfmt').addEventListener('change', () => { store.set('mf_hfmt', $('hfmt').value); renderAll(); });
+['tFrom','tTo'].forEach(id => $(id).addEventListener('input', () => store.set('mf_'+id, $(id).value)));
+$('rndBtn').onclick = () => {
+  if (!$('tFrom').value || !$('tTo').value) { toast('Indica la hora inicial y final del rango.'); return; }
+  const toMin = v => { const [h, m] = v.split(':').map(Number); return h*60 + m; };
+  const a = toMin($('tFrom').value);
+  let b = toMin($('tTo').value);
+  if (b < a) b += 1440;                              // rango que cruza la medianoche
+  const r = (a + Math.floor(Math.random() * (b - a + 1))) % 1440;
+  $('time').value = `${pad(Math.floor(r/60))}:${pad(r%60)}`;
+  store.set('mf_time', $('time').value);
+  renderAll();
+  toast(`🎲 Hora elegida: ${formatTime()}\n(entre ${$('tFrom').value} y ${$('tTo').value})`);
+};
+$('seqOn').checked = store.get('mf_seqOn') === '1';
+$('stepMin').value = store.get('mf_stepMin') || 10; $('stepMax').value = store.get('mf_stepMax') || 20;
+$('seqOn').addEventListener('change', () => { store.set('mf_seqOn', $('seqOn').checked ? '1' : '0'); if ($('seqOn').checked) assignAll(); renderAll(); });
+['stepMin','stepMax'].forEach(id => $(id).addEventListener('change', () => store.set('mf_'+id, $(id).value)));
+$('reseq').onclick = () => { assignAll(); renderAll(); toast('Horas reasignadas en orden: ' + items.map(i => i.time).join(' → ')); };
+$('nowBtn').onclick = () => { $('time').value = nowHM(); store.set('mf_time', $('time').value); renderAll(); };
+SETTINGS.forEach(id => $(id).addEventListener('change', () => { store.set('mf_'+id, $(id).value); renderAll(); }));
+
+$('dlAll').onclick = async () => {
+  $('dlAll').disabled = true;
+  let n = 0;
+  for (const it of items.slice()) {
+    saveBlob(await toBlob(it.canvas), fileName(it));
+    $('status').style.color = ''; $('status').textContent = `Descargando ${++n} de ${items.length}…`;
+    await new Promise(r => setTimeout(r, 350));
+  }
+  $('status').textContent = `✔ ${n} imágenes descargadas`;
+  $('dlAll').disabled = items.length === 0;
+};
+
+$('clear').onclick = () => {
+  if (!confirm(`¿Vaciar las ${items.length} imágenes?`)) return;
+  items.length = 0; $('grid').innerHTML = ''; select(null); seq = 0; $('status').textContent = ''; updateUI();
+};
+
+updateUI();
+</script>
+</body>
+</html>
